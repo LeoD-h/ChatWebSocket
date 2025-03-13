@@ -12,25 +12,61 @@ const io = new Server(server, {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-let messageHistory = [];
+const validUsers = {
+  tom: 'tom',
+  toto: 'toto',
+  lolo: 'lolo'
+};
+
+let conversations = {
+  general: []
+};
+
+let connectedUsers = {};
 
 app.get('/', (req, res) => {
   res.sendFile(join(__dirname, 'index.html'));
 });
 
 io.on('connection', (socket) => {
-//   console.log('a user connected');
-  
-  socket.emit('load messages', messageHistory);
+  socket.on('login', ({ username, password }, callback) => {
+    if (validUsers[username] && validUsers[username] === password) {
+      connectedUsers[username] = socket.id;
+      socket.join('general');
+      socket.currentConversation = 'general';
 
-  socket.on('disconnect', () => {
-    // console.log('user disconnected');
+      socket.emit('update users', Object.keys(connectedUsers).filter(user => user !== username));
+      socket.broadcast.emit('update users', Object.keys(connectedUsers));
+
+      callback(true);
+    } else {
+      callback(false);
+    }
   });
 
-  socket.on('chat message', (msgData) => {
-    messageHistory.push(msgData);  
-    
-    io.emit('chat message', msgData);
+  socket.on('join conversation', (conversation) => {
+    if (socket.currentConversation) {
+      socket.leave(socket.currentConversation);
+    }
+    socket.currentConversation = conversation;
+    socket.join(conversation);
+    socket.emit('load messages', conversations[conversation] || []);
+  });
+
+  socket.on('chat message', ({ conversation, username, message }) => {
+    if (!conversations[conversation]) {
+      conversations[conversation] = [];
+    }
+    conversations[conversation].push({ username, message });
+    io.to(conversation).emit('chat message', { conversation, username, message });
+  });
+
+  socket.on('disconnect', () => {
+    const user = Object.keys(connectedUsers).find(user => connectedUsers[user] === socket.id);
+    if (user) {
+      delete connectedUsers[user];
+      io.emit('update users', Object.keys(connectedUsers));
+    }
   });
 });
 
